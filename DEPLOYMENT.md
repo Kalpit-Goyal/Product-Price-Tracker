@@ -68,11 +68,20 @@ scraper bugs but are not:
 2. The in-memory search index is gone on wake, so the first search pays the ~60-75s
    rebuild.
 
-**You need both of these:**
+**Two ways out. Either is fine; they are not both required:**
 
-- Use a **paid** instance type, **or**
-- Keep the service awake with a **separate ping every 10 minutes** (step 4b). The
-  scrape job at 2 hours is far too sparse to do this job.
+- Use a **paid** instance type (`plan: starter`, ~$7/mo). No spin-down, no cold start,
+  no hourly cap, and the search index stays warm.
+- Keep the service awake with a **separate ping every 10 minutes** (step 4b). It has to
+  beat the 15-minute idle timeout, and the 2-hourly scrape job is far too sparse to do
+  this job. The scrape job and the ping are independent: the ping does not start scrapes.
+
+This project ships with `plan: free` plus the ping, because the assignment specifies free
+tiers. Be aware of what that costs: Render grants 750 free instance-hours per workspace
+per month, and a service that is never asleep consumes roughly 744 of them — about 6 hours
+of slack for the whole month. Exhausting that cap suspends *every* free service on the
+account until the 1st, not just this one. If you would rather not carry that, switch to
+`starter` in `render.yaml` and drop the ping.
 
 A second limit: free plans cap memory at 512MB. One Chromium context fits comfortably.
 A full 958-product sweep in a single process does not — the scraper is written to be
@@ -83,6 +92,32 @@ resumable so a long sweep can be run in batches rather than one enormous run.
 1. Render dashboard -> **New -> Blueprint**.
 2. Connect `Kalpit-Goyal/Product-Price-Tracker`.
 3. Render reads `render.yaml` and pre-fills everything.
+
+> **CHECK THE SERVICE NAME RENDER GAVE YOU.** The `name:` in `render.yaml` is a
+> *request*, not a guarantee. If that name is already taken on the account, Render
+> silently appends a suffix and your real URL differs from the one in the config.
+>
+> On this account `ine-price-tracker-api` was already held by an unrelated older app
+> (`ine-assessment`), so our service became `ine-price-tracker-api-jmf0`. Everything else
+> in this runbook uses `<api>` — substitute the URL Render actually shows you.
+>
+> The failure mode is nasty and worth recognising: the name you *expected* still
+> resolves, still answers `/api/health` with `200`, and is **a different application**,
+> so a health check alone will happily pass against the wrong service. `{"ok":true}` with
+> `404` on every other route is the tell. Check the response actually contains
+> `trackedProducts`, and confirm the hostname in Render's dashboard.
+>
+> To read the real values instead of guessing:
+>
+> ```powershell
+> $kv = @{}
+> foreach ($l in [System.IO.File]::ReadAllLines('backend\.env')) {
+>   if ($l -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$') { $kv[$Matches[1]] = $Matches[2].Trim() }
+> }
+> $h = @{ Authorization = "Bearer $($kv['RENDER_API_KEY'])" }
+> (Invoke-RestMethod 'https://api.render.com/v1/services?limit=50' -Headers $h).service |
+>   ForEach-Object { "$($_.name) -> $($_.serviceDetails.url)" }
+> ```
 4. Set the three secrets it marks `sync: false`:
 
    | Key | Value |
@@ -264,7 +299,15 @@ curl -X POST "$api/api/products" -H 'Content-Type: application/json' -d '{
 }'
 curl "$api/api/products"
 
-# 4. The cron secret is enforced (this must be 401).
+# 4. History and attempts take the internal UUID, NOT storeProductId. This is an
+#    easy mistake: /api/products/:storeProductId/options takes a number, while
+#    /api/products/:id/history and .../attempts take the UUID from /api/products.
+#    Passing 2662 there returns 500 "invalid input syntax for type uuid".
+$uuid = (curl -s "$api/api/products" | ConvertFrom-Json).products[0].id
+curl "$api/api/products/$uuid/history"
+curl "$api/api/products/$uuid/attempts"
+
+# 5. The cron secret is enforced (this must be 401).
 curl -X POST "$api/api/scrape/run"
 ```
 

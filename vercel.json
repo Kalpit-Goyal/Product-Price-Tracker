@@ -8,7 +8,8 @@
   "//frontendRoot": "Vercel needs to be told the app lives in frontend/, not at the repo root. Set the Root Directory to `frontend` in the Vercel dashboard, and this file's build paths are then relative to that.",
   "//env": "VITE_API_BASE_URL is PUBLIC and is compiled into the bundle. It is safe to expose. Never put the Supabase service-role key or CRON_SECRET in a VITE_ variable -- anything prefixed VITE_ ships to the browser.",
   "env": {
-    "VITE_API_BASE_URL": "https://ine-price-tracker-api.onrender.com"
+    "//apiUrl": "Render suffixed the service name with -jmf0 because 'ine-price-tracker-api' was already taken on the account by an unrelated older app. Verified via GET /v1/services: our service id is srv-daru2ovavr4c7386v3g0 and its URL is the suffixed one. Do NOT 'simplify' this back to the unsuffixed name -- that hostname serves a different application.",
+    "VITE_API_BASE_URL": "https://ine-price-tracker-api-jmf0.onrender.com"
   },
 
   "//rewrites": "This is a single-page app with no client-side router, so the only route is /. The rewrite keeps a hard refresh on / from 404ing if a path is ever added, and leaves /api/* alone.",
