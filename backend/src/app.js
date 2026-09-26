@@ -398,7 +398,13 @@ app.post(
       return res.status(401).json({ error: 'unauthorized', message: 'X-Cron-Secret header required' });
     }
 
-    const run = await createScrapeRun(devTriggerAllowed && !req.get('x-cron-secret') ? 'dev-ui' : 'api');
+    // A secret-authenticated call is the external scheduler, not a person. The dev-UI
+    // path is the only unauthenticated one and it is dead code in production, so every
+    // 'cron' run here really did arrive from the scheduler. Labelling it 'cron' rather
+    // than the vaguer 'api' is what makes a scheduled cycle verifiable from the database
+    // instead of only from the scheduler's own history.
+    const trigger = devTriggerAllowed && !req.get('x-cron-secret') ? 'dev-ui' : 'cron';
+    const run = await createScrapeRun(trigger);
     logger.info(
       { event: 'run_requested', runId: run.id, viaSecret: Boolean(req.get('x-cron-secret')) },
       'scrape run requested via API'
@@ -409,7 +415,7 @@ app.post(
     // and the caller would never learn whether it had worked.
     res.status(202).json({ runId: run.id, status: 'accepted' });
 
-    scrapeAllTrackedProducts({ trigger: `api:${run.id}` })
+    scrapeAllTrackedProducts({ trigger: `${trigger}:${run.id}` })
       .then(async (summary) => {
         await finishScrapeRun(run.id, summary);
         logger.info({ event: 'run_finished_via_api', runId: run.id, ...summary, products: undefined }, 'api-triggered run finished');
