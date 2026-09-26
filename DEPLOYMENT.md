@@ -18,14 +18,11 @@ You need:
 | Vercel account | the dashboard | yes |
 | cron-job.org account | the 2-hourly schedule | yes |
 
-Generate the cron secret now and keep it somewhere you can copy from twice:
-
-```powershell
-# PowerShell, run once. Copy the output; you will paste it into Render and cron-job.org.
-$bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-[Convert]::ToBase64String($bytes)
-```
+You do **not** need to generate a cron secret yourself. `render.yaml` marks `CRON_SECRET`
+as `generateValue: true`, so Render creates it when the blueprint is applied, and you read
+it back out of the dashboard afterwards (step 2.5). An earlier version of this runbook
+told you to generate your own and paste it into both Render and cron-job.org, which
+contradicted the blueprint and left the value nowhere to be found.
 
 ---
 
@@ -94,8 +91,10 @@ resumable so a long sweep can be run in batches rather than one enormous run.
    | `SUPABASE_SERVICE_ROLE_KEY` | from step 1 |
    | `ALLOWED_ORIGIN` | `*` for now — see the note below |
 
-   `CRON_SECRET` uses `generateValue: true`, so Render creates it. **Copy it from the
-   dashboard now** — you need it in step 4 and Render will not show it again.
+   `CRON_SECRET` uses `generateValue: true`, so Render creates it — you do not supply a
+   value for it, and you should not try to paste your local `.env` one in. The two are
+   unrelated values; the deployed API checks against the Render one, and pasting the
+   local secret produces a `401` on every scrape. See step 2.5 for how to read it back.
 
    **WHY `ALLOWED_ORIGIN` IS `*` HERE AND NOT YOUR VERCEL URL.** An earlier version of
    this runbook told you to paste the Vercel URL at this step, which is a deadlock: the
@@ -117,6 +116,35 @@ resumable so a long sweep can be run in batches rather than one enormous run.
 
    The second line is the background search-index build finishing. It takes about a
    minute. That is expected and it is not blocking the deploy.
+
+### 2.5 Read `CRON_SECRET` back out of Render
+
+Render generated it; now you need it for step 4a.
+
+1. **Render -> your service -> Environment.**
+2. Find `CRON_SECRET` in the list. The value is masked.
+3. Click the eye (reveal) icon, or **Edit** and read the value without changing it.
+4. Copy it somewhere you can paste it once, in step 4a. Do not save a changed value —
+   if you accidentally overwrite it, the next deploy invalidates the cron job's header
+   and every scrape silently returns `401`.
+
+Render does not show generated secret values again after you leave the Environment tab,
+so grab it before you switch context.
+
+**Sanity check before you use it in step 4a** — this is the one that catches a
+copy/paste slip early, and it is much cheaper to diagnose here than from a failing cron
+two hours from now:
+
+```powershell
+# Paste the Render value in as $renderSecret, then run:
+# expect: 401 -- correct, it proves the secret is enforced
+curl -X POST https://<api>.onrender.com/api/scrape/run -H "X-Cron-Secret: $renderSecret" -o NUL -w "%{http_code}"
+# expect: 202 -- the value matches and a run has started
+```
+
+A `401` on the *second* call means the header value does not match what the deployed
+service holds — most often a truncated paste, a stray newline, or the local `.env`
+secret being used by mistake.
 
 ### Health check settings
 
