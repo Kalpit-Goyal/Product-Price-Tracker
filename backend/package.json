@@ -1,0 +1,38 @@
+{
+  "name": "ine-price-tracker-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scheduled scraper + API for the INE mock store price tracker",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "scrape": "node scripts/scrape.js",
+    "scrape:headed": "node scripts/scrape.js --headed",
+    "seed": "node scripts/seed.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "smoke": "node scripts/smoke.mjs",
+    "verify:options": "node scripts/verify-options.mjs",
+    "diag:gate": "node scripts/diag-gate.mjs",
+    "diag:click": "node scripts/diag-clickmethod.mjs",
+    "diag:formats": "node scripts/diag-formats.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs",
+    "demo:failure": "node scripts/scrape.js --demo-fault=gate",
+    "demo:throttle": "node scripts/scrape.js --demo-fault=throttle",
+    "demo:headed": "node scripts/scrape.js --headed --slowmo=60 --demo-fault=gate"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "cors": "^2.8.5",
+    "csv-stringify": "^6.5.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "playwright": "^1.48.2",
+    "zod": "^3.23.8"
+  }
+}

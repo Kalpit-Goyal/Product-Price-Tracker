@@ -1,0 +1,29 @@
+# Normalise line endings in the repository, not in the working tree.
+#
+# WHY THIS FILE EXISTS. Without it, Git on Windows rewrites LF to CRLF on checkout and
+# warns on every single `git add` -- 50+ warnings per commit for this project. That is
+# noise that trains you to ignore warnings, which is exactly how the real ones get
+# missed. It also means a file edited on Windows and the same file edited on Linux
+# would show as different blobs, producing phantom diffs.
+#
+# `text=auto` lets Git detect text vs binary. The explicit rules below pin the files
+# where guessing goes wrong.
+
+* text=auto eol=lf
+
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.sql  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Never touched: lockfiles and images must keep their exact bytes.
+*.png binary
+*.jpg binary
+*.ico  binary
+*.woff2 binary
