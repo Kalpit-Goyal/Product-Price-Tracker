@@ -362,13 +362,30 @@ app.get(
 app.post(
   '/api/scrape/run',
   wrap(async (req, res) => {
-    if (!secretMatches(req.get('x-cron-secret'), config.CRON_SECRET)) {
+    // WHY THE DEV-ONLY BYPASS EXISTS. /api/health advertises `allowManualRun`, and the
+    // dashboard renders a "run now" button when it is true. That flag was useless: the
+    // button sent no secret, so it could only ever have returned 401. The two now
+    // agree, and they agree in exactly one direction.
+    //
+    // The condition is the same expression the health route uses, and it is
+    // deliberately impossible to satisfy in production: NODE_ENV is never
+    // 'production' there, so the secret is always required and the bypass is dead
+    // code. A browser still cannot start a scrape on the deployed API. The bypass
+    // exists so that a developer running locally with a seeded store does not have to
+    // paste a secret into devtools, not to weaken the deployed endpoint.
+    const devTriggerAllowed =
+      config.NODE_ENV !== 'production' && process.env.ALLOW_DEV_TRIGGER === '1';
+
+    if (!devTriggerAllowed && !secretMatches(req.get('x-cron-secret'), config.CRON_SECRET)) {
       // 401, not 403: the caller has not proved who they are.
       return res.status(401).json({ error: 'unauthorized', message: 'X-Cron-Secret header required' });
     }
 
-    const run = await createScrapeRun('api');
-    logger.info({ event: 'run_requested', runId: run.id }, 'scrape run requested via API');
+    const run = await createScrapeRun(devTriggerAllowed && !req.get('x-cron-secret') ? 'dev-ui' : 'api');
+    logger.info(
+      { event: 'run_requested', runId: run.id, viaSecret: Boolean(req.get('x-cron-secret')) },
+      'scrape run requested via API'
+    );
 
     // Respond immediately with the run id. A full run drives a real browser and can
     // take minutes; making the cron job wait for it would exceed most HTTP timeouts

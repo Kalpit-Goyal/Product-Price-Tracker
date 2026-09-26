@@ -303,7 +303,7 @@ function RunNotice({ state, onDismiss }) {
     const terminal = run.status !== 'running' && run.status !== 'pending';
     return (
       <div className={`notice ${terminal && run.failed > 0 ? 'warn' : 'good'}`}>
-        Run {run.id}: <b>{run.status}</b>
+        Run {run.runId}: <b>{run.status}</b>
         {run.attempted != null && (
           <>
             {' '}

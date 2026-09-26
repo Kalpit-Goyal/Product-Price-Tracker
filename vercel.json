@@ -1,0 +1,43 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "installCommand": "npm ci",
+
+  "//frontendRoot": "Vercel needs to be told the app lives in frontend/, not at the repo root. Set the Root Directory to `frontend` in the Vercel dashboard, and this file's build paths are then relative to that.",
+  "//env": "VITE_API_BASE_URL is PUBLIC and is compiled into the bundle. It is safe to expose. Never put the Supabase service-role key or CRON_SECRET in a VITE_ variable -- anything prefixed VITE_ ships to the browser.",
+  "env": {
+    "VITE_API_BASE_URL": "https://ine-price-tracker-api.onrender.com"
+  },
+
+  "//rewrites": "This is a single-page app with no client-side router, so the only route is /. The rewrite keeps a hard refresh on / from 404ing if a path is ever added, and leaves /api/* alone.",
+  "rewrites": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+
+  "//headers": "The bundle is content-hashed, so it can be cached forever. index.html must NOT be, or browsers will pin users to a stale bundle that points at deleted asset hashes.",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
+  ]
+}

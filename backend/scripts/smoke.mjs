@@ -233,6 +233,18 @@ try {
 
   // Cron auth. These are the checks that matter most for a public deployment: the
   // scrape endpoint must not be triggerable by anyone who finds the URL.
+  //
+  // The health flag and the endpoint are asserted together on purpose. They drifted
+  // apart once already: /api/health advertised `allowManualRun`, the dashboard rendered
+  // a "run now" button, and the endpoint rejected that button with 401 because it sent
+  // no secret. Checking both in one place is what keeps them honest.
+  const healthForAuth = await call('GET', '/api/health');
+  check(
+    'health says manual runs are NOT allowed here',
+    healthForAuth.json?.allowManualRun === false,
+    `allowManualRun=${healthForAuth.json?.allowManualRun} (this smoke run has no ALLOW_DEV_TRIGGER)`
+  );
+
   const noSecret = await call('POST', '/api/scrape/run');
   check('POST /api/scrape/run without a secret -> 401', noSecret.status === 401, `got ${noSecret.status}`);
 

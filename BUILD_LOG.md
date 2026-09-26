@@ -733,3 +733,152 @@ than presented as tested.
 | Catalog coverage, live, after saturation fix | **956 of 960 (99.6%)** |
 | Search results for "capture", before → after | **4 → 12** |
 | Live options × 6 runs with production retries | **18/18 options read** |
+
+---
+
+## Phase 6 - verification found what the tests could not
+
+Phase 5 ended with three green gates and a working-looking dashboard. It was not finished.
+Everything below was found by *running* the thing rather than by reading it, and three of
+these would have shipped as silent failures.
+
+### Failure 18 - the first search took 76 seconds and would have 504'd in production
+
+**SYMPTOM.** The browser UI check timed out waiting for search results. Not a crash, not an
+empty list - a wait.
+
+**MEASURED.** A cold process, then two identical searches:
+
+| Request | Time | Result |
+|---|---|---|
+| 1st (cold) | **76.1s** | 12 results, 99.8% coverage |
+| 2nd (warm) | **0.0s** | 12 results |
+
+**WHY THIS IS A BUG AND NOT A SLOW FEATURE.** Vercel and Render both terminate a proxied
+request long before 76 seconds. Deployed, the first search after every cold start, every
+redeploy and every wake-from-sleep would simply have failed. It would have looked like a
+broken dashboard, and nothing in the code would have said why.
+
+**ROOT CAUSE.** The catalog index was correct and cached, but nothing ever filled it. It was
+built lazily, by whoever happened to make the first request - so the cost landed on a user.
+
+**FIX.** `warmCatalog()` / `startCatalogWarmer()` in `backend/src/services/catalog.js`,
+called from three places: on boot, on an 8-minute interval (below the 10-minute TTL, so the
+cache cannot go stale under a user), and from the `/api/health` probe. The health hook is the
+interesting one: a cheap uptime ping is also the first request a sleeping host receives, so
+it is the earliest moment we can tell the process restarted and the index is gone. It kicks a
+non-blocking refill, and health never waits on it.
+
+`/api/health` now also reports `catalogWarm`, so the dashboard can explain a slow search
+instead of showing an unexplained spinner.
+
+**TESTS.** Two added, and mutation-checked - neutering `warmCatalog` so it stops building
+anything makes the suite go red, so the test is not passing for free:
+- a cold cache reports cold, `warmCatalog` returns before the build finishes, and the cache
+  really is warm a moment later
+- a failing store leaves the cache cold instead of crashing the process, because the warm-up
+  runs from boot
+
+### Failure 19 - the knob that makes a recording watchable is the knob that breaks the scraper
+
+**SYMPTOM.** Headed runs started failing every attempt with `interaction_gate_never_opened`,
+having passed 18/18 in headless mode minutes earlier.
+
+**ROOT CAUSE.** `--slowmo=250`. The hover gate needs ~14 moves at ~40ms spacing plus a dwell.
+`slowMo` delays *every* Playwright action, so 250ms between moves starves the gate. Nothing
+in the code was wrong; the recording setting was fighting the interaction.
+
+**MEASURED**, headed, all three options of one product:
+
+| `SLOWMO_MS` | Result |
+|---|---|
+| 0 | 3/3 |
+| 60 | 3/3 |
+| 120 | 3/3 |
+| 250 | **0/3** |
+
+**FIX.** Documented at the top of `backend/scripts/scrape.js` and pinned in
+`npm run demo:headed` (`--slowmo=60`). The trap is worth recording because the instinct on
+camera day is to raise slowMo, and raising it is exactly what breaks the run.
+
+### Failure 20 - the dashboard offered a button that could only ever return 401
+
+**SYMPTOM.** `/api/health` advertised `allowManualRun`, the UI rendered a "run now" button,
+and clicking it sent no secret.
+
+**ROOT CAUSE.** The flag and the endpoint had been written at different times and never met.
+The button was decorative.
+
+**FIX.** `POST /api/scrape/run` now permits a secret-less call under exactly the condition the
+health route advertises: `NODE_ENV !== 'production' && ALLOW_DEV_TRIGGER === '1'`. In
+production that expression is unsatisfiable, so the bypass is dead code and the secret is
+always required. Verified in all three states rather than assumed:
+
+| `NODE_ENV` | `ALLOW_DEV_TRIGGER` | `health.allowManualRun` | POST, no secret |
+|---|---|---|---|
+| development | unset | `false` | 401 |
+| development | `1` | `true` | **202** |
+| production | `1` | `false` | **401** |
+
+The smoke test now asserts the flag and the endpoint together, because that is the pair that
+drifted.
+
+### Failure 21 - three bugs that only exist in the verification tool
+
+Worth listing because all three cost real time, and all three were silent.
+
+**`node:fs` vs `node:fs/promises`.** `verify-ui.mjs` used the callback `readFile`/`stat` with
+`await`. Node does not throw for a missing callback in an async function's try block - it
+returns `HTTP 500` for every request, and the tool reported "static server not ready". The
+stack trace named the line immediately; the first fix attempt did not, because the tool was
+swallowing the error. **Lesson applied: a verification tool must never fail silently, or it
+becomes the thing that wastes the time it exists to save.**
+
+**IPv4 vs IPv6.** `vite preview` binds `localhost`, which resolves to `::1` on Windows. The
+probe used `127.0.0.1`. A healthy server, 25 failed retries, and no output - because the probe
+only printed on success, so total failure looked identical to a hang. Fixed at the root: the
+tool now spawns its own backend and static server, tries both loopback families, prints *why*
+it gave up, and tears everything down in a `finally`. An earlier run of this tool also left a
+13-hour-old orphan `node src/index_test.js` behind, which is what the teardown now prevents.
+
+**A regression I introduced myself.** While adding the fault injector I wrote
+`"demo:failure": "cross-env DEMO_FAULT=gate node scripts/scrape.js"`. `cross-env` is not a
+dependency of this project, and `FOO=bar node x.js` does not work in cmd.exe or PowerShell
+either - so the script was broken in the exact environment it was written for. Replaced with a
+`--demo-fault=<kind>` flag, which is the only form that behaves identically everywhere.
+
+Also fixed while checking the run API against the UI: the run notice rendered `Run undefined`,
+because the API returns `runId` and the component read `run.id`. The adjacent
+`attempted`/`succeeded`/`failed` fields were correct, and the runbook's first draft
+documented the wrong shape - caught by reading the handler rather than trusting the draft.
+
+### Why a browser check exists at all
+
+55 unit tests and 35 API smoke checks were green while the dashboard could have been blank.
+Those gates prove the routes answer. They cannot prove the React app *uses* the answers: a
+wrong field name, a payload shape the chart cannot plot, or a component crash all produce a
+perfectly healthy API and an empty page. Both real frontend bugs found so far
+(`latestPrice` guessed as `lastPrice`, a `history` array assumed where the API returns
+`{ count, history }`) were invisible to every API-level check.
+
+So `backend/scripts/verify-ui.mjs` launches real Chromium against a real backend and asserts
+on rendered text, including `never "undefined"` checks and a browser-network assertion for
+4xx responses that fail quietly into an empty list.
+
+### Verification after Phase 6
+
+| Check | Result |
+|---|---|
+| Unit tests | **55/55** |
+| API smoke test, all documented routes | **35/35** |
+| Browser UI, real Chromium, real store | **21/21** |
+| Frontend production build | **665ms**, 162KB / 52KB gzipped |
+| Cold search | **86s in the background, 0.0s to the user** |
+| Catalog coverage, live | **956-958 of 960** |
+| Headed run, `slowmo=60` | **3/3 options** |
+| Demo fault: fail, retry, recover | failed attempt stored `retried` with NULL price, then 1 history row |
+
+**KNOWN LIMIT.** No Supabase project exists in this environment, so the SQL migrations, the
+`record_success()` RPC and the RLS policies are verified by reading and by the memory-mode
+parity tests only. The production run remains unexecuted. This is called out rather than
+presented as tested.
