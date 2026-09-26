@@ -983,3 +983,193 @@ correctly, which is the most common way a Playwright deployment breaks.
 The grants are proven revoked at the SQL level and a garbage key returns 401, but a
 malformed key is rejected at the gateway before RLS is consulted — those are different
 tests and only the first is strong evidence.
+
+---
+
+## Phase 8 - the deployment that was green and completely broken
+
+### Failure 22 - a browser that was installed, then thrown away before it ever ran
+
+The most expensive bug in this project, and it produced zero error signals.
+
+Every production scrape attempt, across every deploy, failed with the same line:
+
+```
+browserType.launch: Executable doesn't exist at
+/opt/render/.cache/ms-playwright/chromium_headless_shell-1243/...
+```
+
+`buildCommand` was `npm ci && npx playwright install chromium`. That `npx` line
+*worked* - it downloaded Chromium successfully during the build. The build went
+green. The deploy went live. `/api/health` returned 200. Every route answered.
+
+And then the binary was gone, because `/opt/render/.cache` is not persisted into
+the runtime container. Render builds in one container and runs in another, and
+that particular path does not cross the boundary. The download succeeded, the
+build reported success, and the artifact was discarded.
+
+Render's support documentation names this exact case, and the fix is to point
+`PLAYWRIGHT_BROWSERS_PATH` at a directory inside the project, which *is*
+persisted:
+
+```yaml
+- key: PLAYWRIGHT_BROWSERS_PATH
+  value: /opt/render/project/.cache/playwright
+```
+
+It is declared as a **service env var** rather than inlined into `buildCommand`,
+and that detail is the whole trap. Setting it only on the build command is the
+same bug wearing a different hat: install to one place, look in another. A
+service env var is visible to both the build and the runtime, which is the only
+property that makes it correct.
+
+Worth being honest about the cost: two full deploy cycles and one complete
+store-traffic-burning run were spent on this, and none of them produced a useful
+signal. A green deploy told us nothing.
+
+### Failure 23 - the fix had to be *observable*, not just applied
+
+Applying the env var would have worked, but the next person to touch
+`buildCommand` could silently reintroduce the failure with no way to notice,
+because the failure mode is invisible from outside. So the fix ships with a
+canary:
+
+`/api/health` now returns `browserAvailable`, `browserCheckedAt` and
+`browserError`, sourced from a startup probe that launches a browser and closes
+it. A red deploy became diagnosable from one HTTP call.
+
+`browserError` carries its weight because the two possible causes need *opposite*
+remedies, and conflating them wastes a cycle:
+
+| `browserError` | meaning | fix |
+| --- | --- | --- |
+| `Executable doesn't exist` | not installed, or not persisted | set the path, redeploy with cache cleared |
+| `Host system is missing dependencies` | installed fine, image lacks libs | no reinstall helps; use the Playwright Docker image |
+
+The probe deliberately does not exit the process. History, search and CSV all
+read from the database, so a degraded service is genuinely more useful than an
+unreachable one.
+
+### A correction to the note above
+
+The Phase 7 note said native builds work because "Playwright's postinstall
+downloads Chromium onto an image that already has the required system libraries."
+The conclusion was right and both halves of the reason were wrong:
+
+1. `npm ci` does *not* run a Playwright postinstall that downloads a browser.
+   That absence is the reason the explicit `npx playwright install` line was
+   needed in the first place.
+2. The system-library question was never actually tested. It was assumed.
+
+It has now been tested: `browserAvailable: true` on Render's native Debian 12
+image, including after a cache-cleared deploy. So no `Dockerfile` is still the
+right call - but for a verified reason rather than an assumed one, and the
+Playwright Docker image stays on the table as the documented fallback instead of
+being quietly ruled out on a false premise.
+
+### Failure 24 - I misread the Render API and nearly "fixed" a paid plan that was free
+
+Chasing this, I read the service payload looking for a build command, found
+nothing at the top level, and concluded the Blueprint had never been applied.
+It had. `buildCommand` is nested under `serviceDetails.envSpecificDetails`, and I
+was reading the wrong level of the object.
+
+The same careless read produced a "the service is on a paid plan" conclusion from
+`serviceDetails.buildPlan: "starter"`. That field is the *build* plan. The
+instance plan is `serviceDetails.plan: "free"`. Reporting a paid tier to a user
+who had explicitly required free-only, on the strength of a field I had not
+identified, was the actual failure here - the wrong field path was just how it
+surfaced.
+
+Lesson recorded because it generalises: when a field looks like the thing you
+expect, verify by *mutating* it. Setting `PLAYWRIGHT_BROWSERS_PATH` through the
+env-vars API and reading it back proved the deployment surface was real in one
+request, which was worth more than any amount of reading.
+
+### A correction to an earlier diagnosis
+
+Run `47bb40cd` was previously reported as orphaned, interrupted mid-flight, and
+attributed to a deploy that was still running. All three were wrong. It had a
+clean `finished_at`, `attempted=11`, and a 23-minute gap between the deploy
+ending and the run starting. The instance had simply gone to sleep and woken
+with `uptime` reset - which is what sleep looks like, and is not evidence of
+interruption.
+
+It had, in fact, failed 11 of 11 for the same reason as every other run. There
+was never a second, unrelated deployment problem. Chasing an interruption theory
+because the first explanation felt too mundane was the error.
+
+Two schema facts that made the confusion possible, and cost time to rediscover:
+`scrape_runs` has no `status` column (use `finished_at IS NULL`), and
+`scrape_attempts` has no `scrape_run_id`, so attempt rows cannot be joined to a
+run at all - they can only be bracketed by `attempted_at`. Polling
+`scrape_attempts` "for run X" is not a thing that works, and assuming otherwise
+produces confident nonsense.
+
+### Failure 25 - the cron API is not what the search results implied
+
+First attempt at creating the schedule: `POST
+https://api.cron-job.org/api/v2/jobs`. HTTP 404, empty body.
+
+There is no `/api/v2` on this API. The real interface, from the official docs:
+
+- base endpoint `https://api.cron-job.org/` - no version segment
+- create is `PUT /jobs` with a `{"job": {...}}` envelope, not a bare object
+- `POST` is the integer `requestMethod: 1`, not the string `"POST"`
+- request headers live in `extendedData.headers`, **not** a top-level `headers`
+- there is no `interval` schedule type; `hours` is an explicit array of 0-23
+  where `[-1]` means *every* hour, so "every 2 hours" must be spelled out as the
+  even hours
+
+Every one of those was wrong in the first attempt. A 404 with an empty body is
+also an unhelpful failure - it looks like a network or auth problem rather than
+a wrong path, and the first instinct is to retry the same shape.
+
+### Failure 26 - `nextExecution` is a prediction, and it loses races
+
+The one-shot cron test armed the job for the next minute, waited
+`prediction + 25s`, and found no execution. The job had not failed. cron-job.org
+adds random execution **jitter** - the `HistoryItem` type documents a `jitter`
+field in milliseconds, and a real firing measured **15,488ms** late.
+
+Sleeping for a fixed offset from a predicted timestamp is a race that loses.
+Polling the history for a new entry is the correct shape, and the rerun passed:
+HTTP 202, 15s drift, run queued.
+
+The read-back also confirmed the two secrets are doing their separate jobs and
+were never interchangeable:
+
+```
+auth header  : X-Cron-Secret matches local CRON_SECRET
+```
+
+### A finding that matters more than it looks - 'api' hid 'cron'
+
+The scheduler had been working the whole time, but every run it produced was
+recorded as `trigger = 'api'` - the same label a human gets from pasting the
+secret into curl. Nothing in the database could tell an automated cycle from a
+manual poke, which defeats the purpose of keeping a run history at all.
+
+A secret-authenticated call *is* the scheduler by definition: the dev-UI path is
+the only unauthenticated one, and it is dead code in production. So the branch
+that now records `'cron'` is exactly the set of externally-originated calls. The
+rename costs nothing and turns "did the job really run" into a single query
+instead of an exercise in trusting someone else's logs.
+
+### What finally worked, measured
+
+- `browserAvailable: true` on Render native, after a **cache-cleared** deploy -
+  proving the path is genuinely inside the project and not a cache artifact
+- First real production scrape: **11 attempted, 10 succeeded, 1 failed**
+- The single failure was `offer panel never reached ready/failed after 3 gate
+  cycles` - store-side rendering latency, retried four times, still lost. Not
+  infrastructure. That option had scraped fine locally and in the next run.
+- Second run, fired autonomously by cron-job.org: **11/11**
+- Prices landed as real, distinct, plausible numbers with sensible stock counts,
+  and the public read API served all 11 options unauthenticated, which is the
+  path the dashboard depends on
+
+**STILL PENDING.** Two consecutive 2-hourly cycles from the real schedule
+(20:00Z and 22:00Z) are the actual deliverable and have not yet elapsed. Vercel
+is still undeployed for want of a token. The `.env` backup in git history is
+still unrotated.
