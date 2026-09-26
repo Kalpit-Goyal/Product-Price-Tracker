@@ -878,7 +878,108 @@ on rendered text, including `never "undefined"` checks and a browser-network ass
 | Headed run, `slowmo=60` | **3/3 options** |
 | Demo fault: fail, retry, recover | failed attempt stored `retried` with NULL price, then 1 history row |
 
-**KNOWN LIMIT.** No Supabase project exists in this environment, so the SQL migrations, the
-`record_success()` RPC and the RLS policies are verified by reading and by the memory-mode
-parity tests only. The production run remains unexecuted. This is called out rather than
-presented as tested.
+---
+
+## Phase 7 - Standing up real infrastructure
+
+The "KNOWN LIMIT" above said no Supabase project existed, so the migrations and
+`record_success()` were verified only by reading. That is no longer true, and a
+stale caveat is worse than none: it reads as "untested" when the code is in fact
+exercised, or it gets skimmed as boilerplate. So the real results first.
+
+### Resolved - the database question
+
+| Check | Result |
+|---|---|
+| Migrations `001` + `002` | applied over direct Postgres, idempotently |
+| Project region | `ap-southeast-1`, **not** the `ap-south-1` I assumed first |
+| RLS enabled | all 4 tables |
+| `record_success` | present, `SECURITY DEFINER` |
+| `anon` / `authenticated` grants | no table privileges at all |
+| Live write, product 2662 | 3/3 options, 3 history rows, 3 successful attempts |
+
+The live write is the only proof that mattered. `SECURITY DEFINER` is the kind of thing
+that is trivially correct on paper and silently broken in practice, and the fact that
+`last_scraped_at` moved proves the function committed rather than just returning 200.
+
+### Failure 18 - the store is on the legacy key scheme, and I generated the wrong key
+
+**SYMPTOM.** The `sb_secret_...` key from the Supabase dashboard was rejected with
+`UNAUTHORIZED_INVALID_API_KEY_TYPE`.
+
+**WHY.** I assumed the new-style publishable/secret key pair would be the modern
+correct choice. This project only accepts the legacy `service_role` JWT. The error name
+is the useful part: "invalid API key *type*" means the endpoint recognised the request
+and refused the credential's shape, which is a different problem from an invalid value
+and pointed straight at the scheme rather than at a typo.
+
+### Failure 19 - the pooler hostname I guessed did not resolve
+
+**SYMPTOM.** `db.<ref>.supabase.co` failed DNS, and the pooler with the wrong region
+returned `tenant or user not found`.
+
+**WHY IT MISLED.** A wrong-region pooler returns an auth-shaped error, so it reads like
+a bad password and sends you off resetting credentials that were fine. The giveaway is
+that Supavisor's routing lookup fails *before* password auth is ever attempted, so the
+message says nothing about the password. Probing all 13 regions made it obvious: 12
+returned that same error, 1 worked. The lesson is that "not found" from a pooler is a
+region problem far more often than a credentials problem.
+
+### Failure 20 - the smoke suite reported a security failure that did not exist
+
+**SYMPTOM.** 3 checks failed, and they were exactly the auth ones: manual runs "not
+allowed", and secret-less / wrong-secret runs returning `202` instead of `401`.
+
+**WHY.** All three assert the dev bypass is OFF, and the README tells you to set
+`ALLOW_DEV_TRIGGER=1` in `.env` so the local "run now" button works. `config.js` loads
+that `.env` at boot, so the harness inherited the very value it was asserting the
+absence of. My first fix — deleting the variable in `smoke.mjs` — changed nothing,
+because `dotenv.config()` runs *after* the harness and re-injects it. Deleting at the
+call site cannot beat a load that happens later; the env file has to be redirected.
+
+**WHY THIS ONE MATTERS MORE THAN A NORMAL TEST BUG.** A suite that cries wolf about
+security trains you to ignore red, and it failed for anyone who followed the README.
+Fixed in `config.js` by honouring `DOTENV_CONFIG_PATH`, mutation-checked (reverting it
+returns 32/35), and left in place rather than worked around.
+
+### Deployment tradeoff - the free tier is workable, and it is tight
+
+Render idles free services after 15 minutes, and this project runs on a 2-hourly cron, so
+the service would be asleep on every single cron fire. Two ways out, per `render.yaml`:
+
+- `plan: starter` (~$7/mo) — no spin-down, no cold start, no hourly cap.
+- `plan: free` plus a `GET /api/health` ping every 10 minutes. Verified that
+  `cron-job.org`'s free tier allows up to 60 executions/hour, so 10 minutes is fine.
+
+Shipping **free + ping**, because the assignment specifies free tiers. The cost is worth
+writing down rather than discovering: Render grants 750 free instance-hours per workspace
+per month, and a service that is never asleep consumes ~744 of them. That is ~6 hours of
+slack for the entire month, and exhausting the cap suspends *every* free service on the
+account until the 1st. Verified that the ping is genuinely cheap — `warmCatalog` returns
+early when the index is already warm (`catalog.js:330`), so 144 pings/day are no-ops.
+
+Cold starts also reset the in-memory search index, so the first search after a wake pays
+a 60-75s rebuild. `/api/health` already kicks off a background warm on the first request
+(`app.js:105`), so a woken instance is warm by the time a real search arrives.
+
+### Deployment fix - the runbook deadlocked on its own ordering
+
+`DEPLOYMENT.md` told you to set `ALLOWED_ORIGIN` to your Vercel URL before deploying the
+backend, but the Vercel URL does not exist until the backend is deployed. Neither step
+could start. The fix is to deploy with `*` and tighten it in a new step 3.5, and that is
+safe on the merits: the API is public and read-mostly, and the one mutating route is
+gated by `CRON_SECRET` rather than by origin, so a browser cannot forge it. A narrower
+CORS policy would buy no security while forcing an API redeploy on every frontend
+URL change.
+
+### Deployment note - no Docker, on purpose
+
+No `Dockerfile` and no compose file. `render.yaml` builds natively, so Playwright's
+postinstall downloads Chromium onto an image that already has the required system
+libraries. Writing a Dockerfile by hand would mean choosing a base image for Chromium
+correctly, which is the most common way a Playwright deployment breaks.
+
+**STILL UNVERIFIED.** A *valid* `anon` key has never been tested against RLS over HTTP.
+The grants are proven revoked at the SQL level and a garbage key returns 401, but a
+malformed key is rejected at the gateway before RLS is consulted — those are different
+tests and only the first is strong evidence.

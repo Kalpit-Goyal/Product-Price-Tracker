@@ -8,32 +8,56 @@
 # secret is a leaked secret, and config.js refuses to boot on a short one anyway.
 #
 # ---------------------------------------------------------------------------
-# THE FREE TIER WILL BREAK THE SCHEDULE. READ THIS BEFORE DEPLOYING.
+# THE FREE TIER SLEEPS, AND THE SCHEDULE HAS TO DEAL WITH IT. READ BEFORE DEPLOYING.
 # ---------------------------------------------------------------------------
-# Render's free web services are idled after ~15 minutes of inactivity, and a
+# Render idles free web services after ~15 minutes without inbound traffic, and a
 # cold start takes roughly 50 seconds. This project runs on a 2-hourly cron, which
-# means the service is ALWAYS asleep when the cron fires. Two consequences:
+# means that WITHOUT help the service is ALWAYS asleep when the cron fires. Two
+# consequences:
 #
 #   1. The cold start eats most of the request budget before the scrape begins.
 #   2. The in-memory search index is gone on every wake, so the first search pays
 #      the ~60-75s rebuild (see backend/src/services/catalog.js).
 #
-# Two fixes, and you need BOTH:
-#   a) Use a paid instance type, or
-#   b) Keep the service awake with a separate ping that runs far more often than
-#      the cron. The /api/health endpoint is cheap and now also kicks off a
+# Two ways out. Either is fine; they are not both required.
+#
+#   a) A paid instance type (plan: starter, ~$7/mo). No spin-down, no cold start, no
+#      hourly cap, and the search index stays warm. Simplest and most reliable.
+#
+#   b) Keep the service awake with a separate ping far more often than the scrape.
+#      GET /api/health every 10 minutes via cron-job.org or UptimeRobot. That endpoint
+#      is cheap, returns instantly even when the index is cold, and kicks off the
 #      background index rebuild, which is exactly what you want on a wake-up.
-#      Set the keep-warm ping to every 10 minutes via cron-job.org or UptimeRobot.
-#      Do NOT rely on the 2-hourly scrape job to do this -- it is far too sparse.
+#      The ping MUST be under 15 minutes to beat the idle timeout; 10 leaves margin.
+#      Do NOT rely on the 2-hourly scrape job to do this -- far too sparse.
+#
+# This blueprint ships (b), because the assignment specifies free tiers. Be aware of
+# what (b) costs: the service never sleeps, so it bills against the workspace's
+# 750 free instance-hours ~744h per month. See the note on `plan` below.
 #
 # Playwright note: the free plan also caps memory at 512MB. One Chromium context
 # fits; a full 958-product sweep does not run in one process comfortably. The
 # scraper is written to be resumable so a long sweep can be run in batches.
+#
+# No Docker, deliberately. render.yaml builds natively (buildCommand: npm ci), so
+# Playwright's postinstall downloads Chromium onto an image that already has the
+# system libraries it needs. A hand-written Dockerfile would have to pick that base
+# image by hand, which is the most common way a Playwright deploy breaks.
 services:
   - type: web
     name: ine-price-tracker-api
     runtime: node
-    plan: starter # free | starter. See the note above before choosing 'free'.
+    plan: free # free | starter. See the note above before choosing 'free'.
+    # WHY THIS IS 'free' AND NOT 'starter'. Free is the assignment's constraint, and the
+    # 10-minute keep-warm ping in DEPLOYMENT.md step 4b does defeat the 15-minute idle
+    # spin-down. The thing to be aware of, because it is not obvious from the dashboard:
+    # Render grants 750 free instance-hours per WORKSPACE per calendar month, and a
+    # running service consumes them whether or not anyone is using it. A 10-minute ping
+    # means the service is never asleep: 24 x 30.5 = ~744h against a 750h cap, i.e. about
+    # 6 hours of slack for the entire month. Exhaust the cap and Render suspends EVERY
+    # free service on the account until the 1st -- not just this one. Budget accordingly,
+    # or set plan: starter (~$7/mo) and delete the ping, the spin-down and the cap
+    # together. See BUILD_LOG.md for the full tradeoff.
     region: singapore # closest to the store; keeps scrape latency down
     branch: main
     rootDir: backend
@@ -67,6 +91,11 @@ services:
       - key: LOG_LEVEL
         value: info
       # Restrict to the Vercel frontend origin in production. * is fine locally.
+      # WHY YOU CAN LEAVE THIS AS * UNTIL THE FRONTEND IS UP. The real Vercel URL does
+      # not exist until after the backend is deployed, so demanding it here is a
+      # chicken-and-egg deadlock. It is also not doing much security work: the API is
+      # public and read-mostly, and the only mutating route is gated by CRON_SECRET,
+      # not by origin. DEPLOYMENT.md step 3.5 tightens this once both URLs are real.
       - key: ALLOWED_ORIGIN
         sync: false
 

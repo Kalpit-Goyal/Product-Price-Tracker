@@ -40,7 +40,7 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:10000` so the browser se
 one origin. To point somewhere else, set `BACKEND_URL` rather than editing the file:
 
 ```bash
-BACKEND_URL=http://127.0.0.1:3001 npm run dev
+BACKEND_URL=http://127.0.0.1:4000 npm run dev
 ```
 
 ### Running without Supabase

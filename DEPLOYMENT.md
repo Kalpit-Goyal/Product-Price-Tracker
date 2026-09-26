@@ -92,10 +92,22 @@ resumable so a long sweep can be run in batches rather than one enormous run.
    | --- | --- |
    | `SUPABASE_URL` | from step 1 |
    | `SUPABASE_SERVICE_ROLE_KEY` | from step 1 |
-   | `ALLOWED_ORIGIN` | your Vercel URL, e.g. `https://product-price-tracker.vercel.app` |
+   | `ALLOWED_ORIGIN` | `*` for now — see the note below |
 
    `CRON_SECRET` uses `generateValue: true`, so Render creates it. **Copy it from the
    dashboard now** — you need it in step 4 and Render will not show it again.
+
+   **WHY `ALLOWED_ORIGIN` IS `*` HERE AND NOT YOUR VERCEL URL.** An earlier version of
+   this runbook told you to paste the Vercel URL at this step, which is a deadlock: the
+   Vercel URL does not exist until step 3, and step 3 needs the Render URL from this
+   step. Deploy with `*`, then tighten it once both URLs are real.
+
+   `*` is genuinely safe here, and not only as a stopgap. The API is public and
+   read-mostly, and the one route that costs anything (`POST /api/scrape/run`) is gated
+   by `X-Cron-Secret`, never by origin — a browser cannot forge that header. So
+   locking CORS to a single origin would buy no security while forcing an API redeploy
+   every time the frontend URL changed. Tighten it in step 3.5 anyway, so the deployed
+   config is as narrow as it needs to be.
 5. Deploy. Watch the logs for:
 
    ```
@@ -138,13 +150,26 @@ was about to succeed.
 
    This one **is** public — it is compiled into the bundle, and that is correct. It is
    a URL, not a credential.
-5. Deploy, then copy the resulting URL and put it into Render's `ALLOWED_ORIGIN`
-   (step 2.4) so the browser is allowed to call the API.
+5. Deploy, then copy the resulting URL.
+
+### 3.5 Tighten `ALLOWED_ORIGIN` (this is the step 2.4 note being paid off)
+
+Now that the Vercel URL exists, go back to **Render -> your service -> Environment**,
+set `ALLOWED_ORIGIN` to the Vercel origin, and save. Render redeploys automatically.
+
+```
+ALLOWED_ORIGIN = https://<your-project>.vercel.app
+```
+
+Exact origin, scheme included, **no trailing slash**. Then confirm the dashboard still
+loads. If it goes from working to CORS-blocked, this value is the reason and almost
+always because of a trailing slash or an accidental `https://` on an `http://` preview
+URL. Preview deployments get their own origins, so if you test one of those, add it
+here too or expect the API to reject it.
 
 **Verify:** open the Vercel URL. You should see the header, a health strip, and the
 tracked-products panel. If the strip says `degraded` or the browser console shows CORS
-errors, `ALLOWED_ORIGIN` is wrong — it must match the Vercel origin exactly, scheme
-included, with no trailing slash.
+errors, `ALLOWED_ORIGIN` is wrong.
 
 ---
 
