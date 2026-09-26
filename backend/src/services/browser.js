@@ -79,3 +79,38 @@ export async function closeBrowser() {
   }
   browser = null;
 }
+
+/**
+ * Proves a browser can actually be launched, without scraping anything.
+ *
+ * WHY THIS EXISTS. A missing Playwright browser is invisible until the first real
+ * scrape. The service boots, /api/health returns 200, every route answers, the deploy
+ * looks completely green -- and then all 11 products fail with "Executable doesn't
+ * exist". That is precisely how the first deployed run failed, and it cost a full
+ * deploy cycle to diagnose from the database after the fact.
+ *
+ * Checking at startup inverts that: the failure is reported on the deploy that caused
+ * it, in the log next to the build, instead of surfacing hours later as an empty price
+ * history. It launches and immediately closes a browser, costing ~1s and no scraping.
+ */
+export async function verifyBrowserAvailable() {
+  try {
+    const probe = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+    await probe.close();
+    logger.info({ event: 'browser_verified' }, 'playwright browser launches successfully');
+    return true;
+  } catch (err) {
+    // Deliberately does NOT exit the process. The API is still useful without a browser
+    // -- history, search and CSV all work off the database -- so a hard exit would turn
+    // a degraded deployment into an unreachable one. This is loud in the log instead.
+    logger.error(
+      { event: 'browser_unavailable', err: err.message },
+      'CANNOT LAUNCH A BROWSER. Scraping will fail on every product. If this says ' +
+        '"Executable doesn\'t exist", the build did not run ' +
+        '"npx playwright install chromium". If it says the host is missing system ' +
+        'libraries, the native runtime cannot supply them and a Playwright Docker ' +
+        'base image is required.'
+    );
+    return false;
+  }
+}

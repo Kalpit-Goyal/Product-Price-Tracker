@@ -69,6 +69,20 @@ const schema = z.object({
 
   ALLOWED_ORIGIN: z.string().optional().default('*'),
   LOG_LEVEL: z.string().optional().default('info'),
+
+  // Heartbeat the instance's own /api/health while a scrape is in progress, so a host
+  // that reaps idle processes does not kill the run. See src/util/keepalive.js.
+  //
+  // WHY DEFAULT 0. This is only needed where the platform actually idles a service, so
+  // it is opt-in: locally and in the smoke tests it is pure overhead, and in the tests
+  // it would make an ephemeral port call itself. It also never schedules anything --
+  // the external cron still decides when a scrape happens.
+  KEEP_ALIVE_DURING_RUNS: boolish(false),
+  // 60s is well inside Render's ~15m idle window, with room for one slow response.
+  KEEP_ALIVE_INTERVAL_MS: intish(60000),
+  // Loopback by default. Only set this if the service sits behind a proxy that would
+  // not route a self-request, which is unusual.
+  KEEP_ALIVE_URL: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

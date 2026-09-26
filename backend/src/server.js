@@ -3,6 +3,7 @@ import config from './config.js';
 import logger from './util/logger.js';
 import { usingMemoryDb } from './util/db.js';
 import { startCatalogWarmer } from './services/catalog.js';
+import { verifyBrowserAvailable } from './services/browser.js';
 
 /**
  * The HTTP entry point.
@@ -26,6 +27,11 @@ const server = app.listen(config.PORT, () => {
   // costs ~76s of live store traffic, which no proxy will wait out, so the index has
   // to already be there by the time anyone asks for it.
   startCatalogWarmer();
+
+  // Fail loudly here rather than silently on the first cron. Not awaited: the listener
+  // is already accepting requests and the read-only API works fine without a browser,
+  // so there is no reason to make startup wait on it.
+  verifyBrowserAvailable();
 });
 
 /**

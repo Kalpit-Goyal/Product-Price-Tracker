@@ -6,6 +6,7 @@ import { unlockPrice, InteractionError } from './interaction.js';
 import { extractOffer, ExtractionError } from './extract.js';
 import { backoffMs, classifyError, isFatal } from './retry.js';
 import { recordAttempt, recordSuccess, listTrackedProducts } from '../util/db.js';
+import { withKeepAlive } from '../util/keepalive.js';
 
 /**
  * The scraper orchestrator.
@@ -60,37 +61,46 @@ export async function scrapeAllTrackedProducts({ trigger = 'manual' } = {}) {
 
     // Sequential on purpose: polite to the store, and it makes the log readable.
     // SCRAPE_CONCURRENCY exists so this can be raised deliberately, not by accident.
-    const queue = [...products];
-    const lanes = Math.max(1, Math.min(config.SCRAPE_CONCURRENCY, 4));
-    await Promise.all(
-      Array.from({ length: lanes }, () =>
-        (async () => {
-          while (queue.length) {
-            const product = queue.shift();
-            const result = await scrapeOne(product).catch((err) => {
-              // Last-resort containment: scrapeOne handles its own errors, so
-              // reaching here means a bug in our own code. Log it, do not crash.
-              logger.error(
-                { event: 'product_crashed', storeProductId: product.storeProductId, err: err.message },
-                'unhandled error'
-              );
-              return { outcome: 'failed', errorCode: 'internal_error' };
-            });
-            summary.attempted++;
-            if (result.outcome === 'success') summary.succeeded++;
-            else summary.failed++;
-            summary.products.push({
-              storeProductId: product.storeProductId,
-              optionId: product.optionId,
-              outcome: result.outcome,
-              price: result.price ?? null,
-              stock: result.stock ?? null,
-              errorCode: result.errorCode ?? null,
-            });
-          }
-        })()
-      )
-    );
+    //
+    // WHY THIS IS WRAPPED. Everything from here to the end of the lanes is the part
+    // that takes minutes and generates no inbound HTTP traffic, which is exactly what
+    // Render's idle reaper looks for. On a free instance the first deployed run was
+    // killed mid-flight and left its scrape_runs row permanently 'running'. The
+    // wrapper heartbeats /api/health for the duration; see util/keepalive.js for why
+    // that is a liveness aid and not a scheduler.
+    await withKeepAlive(async () => {
+      const queue = [...products];
+      const lanes = Math.max(1, Math.min(config.SCRAPE_CONCURRENCY, 4));
+      await Promise.all(
+        Array.from({ length: lanes }, () =>
+          (async () => {
+            while (queue.length) {
+              const product = queue.shift();
+              const result = await scrapeOne(product).catch((err) => {
+                // Last-resort containment: scrapeOne handles its own errors, so
+                // reaching here means a bug in our own code. Log it, do not crash.
+                logger.error(
+                  { event: 'product_crashed', storeProductId: product.storeProductId, err: err.message },
+                  'unhandled error'
+                );
+                return { outcome: 'failed', errorCode: 'internal_error' };
+              });
+              summary.attempted++;
+              if (result.outcome === 'success') summary.succeeded++;
+              else summary.failed++;
+              summary.products.push({
+                storeProductId: product.storeProductId,
+                optionId: product.optionId,
+                outcome: result.outcome,
+                price: result.price ?? null,
+                stock: result.stock ?? null,
+                errorCode: result.errorCode ?? null,
+              });
+            }
+          })()
+        )
+      );
+    });
 
     logger.info(
       { event: 'run_complete', trigger, ...summary, products: undefined, ms: Date.now() - started },

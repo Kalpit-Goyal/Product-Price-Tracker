@@ -61,7 +61,22 @@ services:
     region: singapore # closest to the store; keeps scrape latency down
     branch: main
     rootDir: backend
-    buildCommand: npm ci
+    # `npm ci` ALONE IS NOT ENOUGH. It installs the playwright package but not the
+    # browser binaries, which live in a separate download. Symptom when this is wrong:
+    # the service boots, /api/health is green, every route works, and then all 11
+    # products fail with
+    #   browserType.launch: Executable doesn't exist at
+    #   /opt/render/.cache/ms-playwright/chromium_headless_shell-<rev>/...
+    # i.e. a deploy that looks completely healthy right up until the first real scrape.
+    # That is exactly what happened on the first deployed run (11/11 failed).
+    #
+    # --with-deps is deliberately NOT used. It shells out to apt, and Render's native
+    # runtime does not allow installing OS-level packages as a non-root user, so the
+    # build would fail outright. This relies on the Debian 12 image already carrying
+    # Chromium's shared libraries. If the browser instead fails to *launch* with a
+    # "Host system is missing dependencies" warning, that assumption is wrong and the
+    # fix is a Docker image based on mcr.microsoft.com/playwright.
+    buildCommand: npm ci && npx playwright install chromium
     startCommand: npm start
     healthCheckPath: /api/health
     # NOTE: render.yaml only supports `healthCheckPath`. The interval, timeout and
@@ -90,6 +105,24 @@ services:
         value: 1
       - key: LOG_LEVEL
         value: info
+
+      # ---- RUN-SCOPED KEEP-ALIVE -------------------------------------------------
+      # A scrape produces no inbound traffic while it works, so a free service can be
+      # idled out from under it mid-run. The heartbeat calls our own /api/health while
+      # a run is in flight. It is NOT a scheduler: it never decides when to scrape, so
+      # the external cron remains the only thing that triggers a run.
+      - key: KEEP_ALIVE_DURING_RUNS
+        value: "1"
+      # 60s sits well inside the ~15m idle window, with room for one slow response.
+      - key: KEEP_ALIVE_INTERVAL_MS
+        value: "60000"
+      # MUST be the public URL. A request the service makes to 127.0.0.1 is not traffic
+      # the host sees arriving, so the loopback fallback would silently do nothing --
+      # it would look configured while still letting the instance be reaped.
+      # The name is fixed by the service's own hostname, so Render needs no input here.
+      - key: KEEP_ALIVE_URL
+        value: https://ine-price-tracker-api-jmf0.onrender.com
+
       # Restrict to the Vercel frontend origin in production. * is fine locally.
       # WHY YOU CAN LEAVE THIS AS * UNTIL THE FRONTEND IS UP. The real Vercel URL does
       # not exist until after the backend is deployed, so demanding it here is a
