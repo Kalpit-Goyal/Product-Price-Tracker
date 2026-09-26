@@ -27,6 +27,7 @@ const logger = pino({
       'req.headers["x-cron-secret"]',
       '*.supabaseServiceRoleKey',
       '*.CRON_SECRET',
+      '*.CRONJOB_API_KEY',
     ],
     censor: '[redacted]',
   },

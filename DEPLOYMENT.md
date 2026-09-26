@@ -131,6 +131,42 @@ resumable so a long sweep can be run in batches rather than one enormous run.
    unrelated values; the deployed API checks against the Render one, and pasting the
    local secret produces a `401` on every scrape. See step 2.5 for how to read it back.
 
+   **`PLAYWRIGHT_BROWSERS_PATH` IS NOT OPTIONAL — READ THIS BEFORE THE FIRST SCRAPE.**
+   `render.yaml` sets it to `/opt/render/project/.cache/playwright`, and both lines of
+   the build depend on it being there:
+
+   - `buildCommand` is `npm ci && npx playwright install chromium`. Plain `npm ci`
+     installs the playwright *package* but never downloads a browser, so the build
+     cannot work without the explicit install.
+   - Without `PLAYWRIGHT_BROWSERS_PATH`, that install writes to
+     `/opt/render/.cache/ms-playwright`, which Render does **not** persist into the
+     runtime container. The build goes green, the download succeeds, the binary is
+     thrown away, and every scrape fails at runtime with
+     `Executable doesn't exist at /opt/render/.cache/ms-playwright/...`.
+
+   This is the single most deceptive failure in the whole deployment. The deploy looks
+   completely healthy — green build, `200` on `/api/health`, every route answering — and
+   the only symptom is that a real scrape returns nothing. That is why
+   `/api/health` now reports `browserAvailable`: **check it before trusting a deploy.**
+
+   ```powershell
+   curl.exe -s https://ine-price-tracker-api-jmf0.onrender.com/api/health
+   # want "browserAvailable":true
+   ```
+
+   - `browserAvailable: false` + `Executable doesn't exist` → the browser was not
+     installed or not persisted. Confirm `PLAYWRIGHT_BROWSERS_PATH` is set, then
+     redeploy **with cache cleared** (an old empty browser dir can otherwise be
+     restored over the new one). Next fallback: `PLAYWRIGHT_BROWSERS_PATH=0`, which
+     installs hermetically into `node_modules`.
+   - `browserAvailable: false` + `Host system is missing dependencies` → the browser
+     installed fine but the Debian 12 native image lacks its shared libraries. No
+     amount of reinstalling fixes that; Render's native runtime cannot install OS
+     packages, so the fallback is a Dockerfile on `mcr.microsoft.com/playwright`.
+
+   If you ever change `buildCommand`, re-check `browserAvailable` afterwards. It is
+   the only signal that the scraper can actually run.
+
    **WHY `ALLOWED_ORIGIN` IS `*` HERE AND NOT YOUR VERCEL URL.** An earlier version of
    this runbook told you to paste the Vercel URL at this step, which is a deadlock: the
    Vercel URL does not exist until step 3, and step 3 needs the Render URL from this
@@ -329,3 +365,6 @@ substitutes for it.
 | Vercel build fails instantly | Root Directory not set to `frontend` | set it in project settings |
 | `config_invalid` in the logs | a secret is shorter than the minimum | `CRON_SECRET` needs 16+, service key 20+ |
 | `product_http_429` in the attempt log | the store throttled us | working as intended; retries back off automatically |
+| Every scrape fails `Executable doesn't exist` | browser not persisted to the runtime container | set `PLAYWRIGHT_BROWSERS_PATH`, then redeploy with cache cleared — see the long note in step 2 |
+| Deploy is green but every scrape returns nothing | same as above | check `browserAvailable` on `/api/health` before trusting a deploy |
+| `401` after pasting a secret into `.env` | local and Render `CRON_SECRET` differ | they are unrelated values; only Render's is checked. `CRONJOB_API_KEY` is a third, separate secret |

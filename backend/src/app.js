@@ -7,6 +7,7 @@ import { z } from 'zod';
 import config from './config.js';
 import logger from './util/logger.js';
 import { getCatalogDetailed, searchProducts, getProductDetail, warmCatalog, isCatalogWarm } from './services/catalog.js';
+import { getBrowserStatus } from './services/browser.js';
 import { scrapeAllTrackedProducts } from './services/scraper.js';
 import {
   listTrackedProducts,
@@ -71,6 +72,7 @@ app.get(
   '/api/health',
   wrap(async (req, res) => {
     const snapshot = await getHealthSnapshot().catch((err) => ({ mode: 'unavailable', error: err.message }));
+    const browserStatus = getBrowserStatus();
     res.json({
       status: snapshot.mode === 'unavailable' ? 'degraded' : 'ok',
       mode: snapshot.mode,
@@ -81,6 +83,21 @@ app.get(
       lastSuccessAt: snapshot.lastSuccessAt ?? null,
       target: config.scrapeBaseUrl,
       uptimeSeconds: Math.round(process.uptime()),
+      // Whether Chromium can actually be launched. This is here because a missing
+      // Playwright browser is the single most deceptive failure this service has: the
+      // deploy is green, health is 200, every route works, and then every scrape fails
+      // with "Executable doesn't exist". Surfacing it on the endpoint that deploy
+      // checks and humans poll turns a silent data outage into a visible one.
+      // 'unknown' until the startup probe finishes.
+      browserAvailable: browserStatus.available,
+      browserCheckedAt: browserStatus.checkedAt,
+      // The first line of the launch failure, so a red deploy can be diagnosed from
+      // this endpoint alone instead of digging through build logs. It distinguishes
+      // the two causes that need opposite fixes: "Executable doesn't exist" means the
+      // browser was not installed or not persisted (check PLAYWRIGHT_BROWSERS_PATH),
+      // while "Host system is missing dependencies" means it installed fine but the
+      // base image lacks its shared libraries, and only a Docker image can fix that.
+      browserError: browserStatus.error,
       // Tells the dashboard whether it may offer a "run the scraper now" button.
       //
       // In production the answer is always false and cannot be overridden: the cron

@@ -106,6 +106,28 @@ services:
       - key: LOG_LEVEL
         value: info
 
+      # ---- PLAYWRIGHT BROWSER LOCATION -------------------------------------------
+      # THE ONE SETTING THAT DECIDES WHETHER SCRAPING WORKS AT ALL.
+      #
+      # Left unset, `npx playwright install chromium` downloads to
+      # /opt/render/.cache/ms-playwright -- which Render does NOT persist into the
+      # runtime container. The build then succeeds, the download succeeds, the binary
+      # is thrown away, and every scrape fails at runtime with:
+      #   browserType.launch: Executable doesn't exist at
+      #   /opt/render/.cache/ms-playwright/chromium_headless_shell-<rev>/...
+      #
+      # That failure is invisible from outside: the deploy is green, /api/health is
+      # 200, every route answers, and only a real scrape reveals it. Render's support
+      # team documents this exact case and names this fix: point the browsers at a
+      # path inside the project directory, which IS persisted.
+      #
+      # Declared as a service env var (not inline in buildCommand) so the SAME path is
+      # used at build time to install and at runtime to launch. Setting it only on the
+      # build command is the classic version of this bug: install to one place, look
+      # in another.
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/.cache/playwright
+
       # ---- RUN-SCOPED KEEP-ALIVE -------------------------------------------------
       # A scrape produces no inbound traffic while it works, so a free service can be
       # idled out from under it mid-run. The heartbeat calls our own /api/health while

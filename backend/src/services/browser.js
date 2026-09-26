@@ -18,6 +18,20 @@ import logger from '../util/logger.js';
 let browser = null;
 let launching = null;
 
+/**
+ * Result of the startup browser probe, exposed on /api/health.
+ *
+ * Starts as unknown rather than false: the probe runs asynchronously after the
+ * listener binds, and reporting `false` during that window would be a lie that reads
+ * as a confirmed failure.
+ */
+const browserStatus = { available: null, checkedAt: null, error: null };
+
+/** Read by app.js to report browser health. */
+export function getBrowserStatus() {
+  return browserStatus;
+}
+
 export async function getBrowser() {
   if (browser?.isConnected()) return browser;
   if (launching) return launching;
@@ -97,9 +111,15 @@ export async function verifyBrowserAvailable() {
   try {
     const probe = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
     await probe.close();
+    browserStatus.available = true;
+    browserStatus.checkedAt = new Date().toISOString();
+    browserStatus.error = null;
     logger.info({ event: 'browser_verified' }, 'playwright browser launches successfully');
     return true;
   } catch (err) {
+    browserStatus.available = false;
+    browserStatus.checkedAt = new Date().toISOString();
+    browserStatus.error = err.message.split('\n')[0];
     // Deliberately does NOT exit the process. The API is still useful without a browser
     // -- history, search and CSV all work off the database -- so a hard exit would turn
     // a degraded deployment into an unreachable one. This is loud in the log instead.
