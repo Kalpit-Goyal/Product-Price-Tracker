@@ -11,7 +11,14 @@ export default defineConfig({
     // a proxy existing in front of it.
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        // WHY THIS IS A VARIABLE. It used to be hardcoded to 127.0.0.1:3001 while the
+        // backend defaults to PORT=10000, so a fresh clone could not talk to itself:
+        // `npm start` in backend/ and `npm run dev` in frontend/ looked fine and
+        // returned nothing. The default now matches backend/src/config.js.
+        //
+        // Override with BACKEND_URL when the backend runs elsewhere:
+        //   $env:BACKEND_URL='http://127.0.0.1:3001'; npm run dev
+        target: process.env.BACKEND_URL ?? 'http://127.0.0.1:10000',
         changeOrigin: true,
       },
     },
