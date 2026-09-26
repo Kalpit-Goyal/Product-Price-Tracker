@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "ine-price-tracker-backend",
   "version": "1.0.0",
   "private": true,
@@ -19,7 +19,7 @@
     "diag:gate": "node scripts/diag-gate.mjs",
     "diag:click": "node scripts/diag-clickmethod.mjs",
     "diag:formats": "node scripts/diag-formats.mjs",
-    "verify:ui": "node scripts/verify-ui.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs", "verify:deployed": "node scripts/verify-deployed.mjs",
     "demo:failure": "node scripts/scrape.js --demo-fault=gate",
     "demo:throttle": "node scripts/scrape.js --demo-fault=throttle",
     "demo:headed": "node scripts/scrape.js --headed --slowmo=60 --demo-fault=gate"

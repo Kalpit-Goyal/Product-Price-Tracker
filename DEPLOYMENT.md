@@ -240,8 +240,9 @@ was about to succeed.
 2. Set **Root Directory** to `frontend`. This is the step people miss; without it
    Vercel looks for a `package.json` at the repo root and fails.
 3. Framework preset: **Vite**. Build `npm run build`, output `dist`.
-   (`vercel.json` already carries these, so the preset is mostly cosmetic.)
-4. Environment variable:
+   (`frontend/vercel.json` already carries these, so the preset is mostly cosmetic.)
+4. Environment variable, set in the Vercel project (**not** in a `vercel.json` `env`
+   block — see below):
 
    ```
    VITE_API_BASE_URL = https://<api>.onrender.com
@@ -249,7 +250,33 @@ was about to succeed.
 
    This one **is** public — it is compiled into the bundle, and that is correct. It is
    a URL, not a credential.
+
+   Set it for **both** Production and Preview. Without it the build still succeeds and
+   the deployment still goes green; the page then fetches `/api/...` against its own
+   origin, where nothing is listening, and renders a dead dashboard. This is the
+   single most deceptive failure in the Vercel deploy, which is why step 3.6 exists.
 5. Deploy, then copy the resulting URL.
+
+### 3.6 Verify the deployed dashboard, not the deployment
+
+**A successful build proves nothing about whether the dashboard works.** Vite inlines
+`VITE_*` variables at build time, so a missing one produces a perfectly valid bundle
+that silently talks to the wrong origin. Every other check in this repo passed while
+the deployed page was completely dead.
+
+```
+cd backend
+npm run verify:deployed -- https://<your-deployment>.vercel.app
+```
+
+This opens the **deployed** URL in real Chromium and asserts on what actually rendered:
+that `/api/` requests were made, that they went to the expected Render host, that 11
+product rows and live prices are on the page, and that there are no console errors or
+4xx/5xx responses. It exits non-zero on failure, so it works as a gate.
+
+It is also the only check that can see a misconfigured CORS allowlist, because a
+browser-enforced CORS rejection leaves the server looking perfectly healthy — the
+server logs a successful response while the page stays empty.
 
 ### 3.5 Tighten `ALLOWED_ORIGIN` (this is the step 2.4 note being paid off)
 
