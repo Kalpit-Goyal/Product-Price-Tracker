@@ -19,7 +19,17 @@ process.env.MEMORY_DB ||= '1';
 process.env.LOG_LEVEL ||= 'silent';
 // The memory store persists to disk so the seed/scrape/API tools can share it. The
 // smoke test must not touch the real dev file, or running it would wipe seeded data.
-process.env.MEMORY_DB_FILE ||= join(tmpdir(), `ine-smoke-db-${process.pid}.json`);
+process.env.MEMORY_DB_FILE ||= join(tmpdir(), `ine-smoke-db-${process.pid}-${Date.now()}.json`);
+
+// The auth checks below assert that a secret-less run is REFUSED. That assertion is
+// only meaningful when the dev bypass is off, but a real .env sets ALLOW_DEV_TRIGGER=1
+// precisely so the dashboard's "run now" button works locally -- and config.js calls
+// dotenv.config(), which re-injects that value AFTER this file runs. Deleting the var
+// here is therefore not enough; it has to be neutralised at the source. The file is
+// only read for a key that is absent from it, so this cannot shadow a real .env
+// (dotenv never overrides an existing process.env value). Assignment 3 checks dev
+// flag ON, production flag ON and flag OFF, so the bypass keeps its own coverage.
+process.env.DOTENV_CONFIG_PATH = join(tmpdir(), `ine-smoke-dotenv-${process.pid}.env`);
 
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

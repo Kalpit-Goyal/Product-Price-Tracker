@@ -8,7 +8,13 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// WHY THE PATH IS OVERRIDABLE. dotenv.config() with no argument always reads ./.env,
+// and it runs *after* any test harness has adjusted process.env -- so a harness cannot
+// stop a real .env from leaking in. scripts/smoke.mjs needs ALLOW_DEV_TRIGGER absent so
+// its "secret-less run must be refused" checks are meaningful, and it sets
+// DOTENV_CONFIG_PATH to a file that does not exist. dotenv never overrides a value
+// already in process.env, so this also cannot shadow a real .env when unset.
+dotenv.config(process.env.DOTENV_CONFIG_PATH ? { path: process.env.DOTENV_CONFIG_PATH } : {});
 
 const boolish = (def) =>
   z
