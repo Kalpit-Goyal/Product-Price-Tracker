@@ -1,5 +1,6 @@
 import HistoryChart, { formatINR } from './HistoryChart.jsx';
-import AttemptLog, { fmtTime } from './AttemptLog.jsx';
+import AttemptLog from './AttemptLog.jsx';
+import { fmtIST, fmtISTFull, fmtUTC } from '../lib/time.js';
 
 /**
  * Everything known about one tracked product.
@@ -57,7 +58,13 @@ export default function ProductDetail({ product, history, attempts, note, loadin
           <dt>Latest stock</dt>
           <dd>{latest ? (latest.stock ?? '—') : <span className="muted">—</span>}</dd>
           <dt>Last checked</dt>
-          <dd>{product.lastScrapedAt ? `${fmtTime(product.lastScrapedAt)} UTC` : <span className="muted">never</span>}</dd>
+          <dd>
+            {product.lastScrapedAt ? (
+              <span title={fmtUTC(product.lastScrapedAt)}>{fmtISTFull(product.lastScrapedAt)}</span>
+            ) : (
+              <span className="muted">never</span>
+            )}
+          </dd>
           <dt>Successful reads</dt>
           <dd>{history?.length ?? 0}</dd>
         </dl>
@@ -81,7 +88,7 @@ export default function ProductDetail({ product, history, attempts, note, loadin
               <table>
                 <thead>
                   <tr>
-                    <th>Scraped (UTC)</th>
+                    <th>Scraped (IST)</th>
                     <th className="num">Price</th>
                     <th className="num">Stock</th>
                   </tr>
@@ -89,7 +96,9 @@ export default function ProductDetail({ product, history, attempts, note, loadin
                 <tbody>
                   {sorted.map((h) => (
                     <tr key={h.id}>
-                      <td className="mono">{fmtTime(h.scrapedAt)}</td>
+                      <td className="mono" title={fmtUTC(h.scrapedAt)}>
+                        {fmtIST(h.scrapedAt)}
+                      </td>
                       <td className="num">{formatINR(h.price)}</td>
                       <td className="num">{h.stock ?? '—'}</td>
                     </tr>

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { formatINR } from './HistoryChart.jsx';
+import { fmtIST, fmtUTC } from '../lib/time.js';
 
 /**
  * The scrape log: every attempt, newest first.
@@ -39,7 +40,7 @@ export default function AttemptLog({ attempts }) {
         <table>
           <thead>
             <tr>
-              <th>Attempted (UTC)</th>
+              <th>Attempted (IST)</th>
               <th className="num">#</th>
               <th>Outcome</th>
               <th className="num">Price</th>
@@ -53,7 +54,11 @@ export default function AttemptLog({ attempts }) {
           <tbody>
             {rows.map((a) => (
               <tr key={a.id}>
-                <td className="mono">{fmtTime(a.attemptedAt)}</td>
+                {/* IST for the reader, with the exact UTC value in the tooltip so the row
+                    can be matched against the CSV export, which is ISO 8601 UTC. */}
+                <td className="mono" title={fmtUTC(a.attemptedAt)}>
+                  {fmtIST(a.attemptedAt)}
+                </td>
                 <td className="num">{a.attemptNumber ?? '—'}</td>
                 <td>
                   <span className={`pill ${a.outcome}`}>{a.outcome}</span>
@@ -75,9 +80,4 @@ export default function AttemptLog({ attempts }) {
       </div>
     </div>
   );
-}
-
-export function fmtTime(iso) {
-  if (!iso) return '—';
-  return String(iso).replace('T', ' ').slice(0, 19);
 }

@@ -1,5 +1,5 @@
 import { formatINR } from './HistoryChart.jsx';
-import { fmtTime } from './AttemptLog.jsx';
+import { fmtIST, fmtUTC } from '../lib/time.js';
 
 /**
  * The tracked list.
@@ -51,7 +51,9 @@ export default function TrackedProducts({ products, selectedId, onSelect, loadin
             <div className="sub">
               {seenAt ? (
                 <>
-                  last read {fmtTime(seenAt)} UTC{stale ? ' · stale' : ''}
+                  last read{' '}
+                  <span title={fmtUTC(seenAt)}>{fmtIST(seenAt)}</span>
+                  {stale ? ' · stale' : ''}
                 </>
               ) : (
                 'not scraped yet'

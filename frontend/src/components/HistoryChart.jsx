@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { fmtIST, fmtISTFull } from '../lib/time.js';
 
 const W = 720;
 const H = 220;
@@ -71,7 +72,7 @@ export default function HistoryChart({ history }) {
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: '100%', height: 'auto', display: 'block' }}
         role="img"
-        aria-label={`Price history, ${points.length} observations from ${new Date(t0).toISOString()} to ${new Date(t1).toISOString()}`}
+        aria-label={`Price history, ${points.length} observations from ${fmtISTFull(t0)} to ${fmtISTFull(t1)}`}
         onMouseLeave={() => setHover(null)}
       >
         {yTicks.map((v) => (
@@ -125,7 +126,7 @@ export default function HistoryChart({ history }) {
           }}
         >
           <div className="t-price">{formatINR(hover.price)}</div>
-          <div className="muted">{new Date(hover.t).toISOString().replace('T', ' ').slice(0, 19)} UTC</div>
+          <div className="muted">{fmtISTFull(hover.t)}</div>
           <div className="muted">stock: {hover.stock ?? '—'}</div>
         </div>
       )}
@@ -148,8 +149,9 @@ export function formatINR(value, compact = false) {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
+/** Axis tick label, in IST to match every other time on the page. */
 function formatDate(t) {
-  return new Date(t).toISOString().slice(5, 16).replace('T', ' ');
+  return fmtIST(t);
 }
 
 function formatSpan(ms) {
