@@ -38,8 +38,8 @@ Thumbs.db
 .vscode/
 *.swp
 
-# The assignment brief itself. REQUIREMENTS.md captures what matters; the PDF is not
-# source and just adds weight to the repo.
+# The assignment brief arrived as a PDF. It is not source and just adds weight to the
+# repo, so it is ignored. The markdown copy of the brief is ignored separately below.
 *.pdf
 
 # Playwright / test artefacts
@@ -47,3 +47,13 @@ test-results/
 playwright-report/
 .playwright/
 .env.bak-*
+
+# Working notes, kept on disk but not published. README.md and DESIGN_NOTE.md are the
+# two documents that are meant to be read, so they stay tracked; these are the private
+# scratch docs behind them. Listed by path rather than as *.md, so a new document is
+# tracked by default instead of silently disappearing.
+/BUILD_LOG.md
+/DEPLOYMENT.md
+/REQUIREMENTS.md
+/TECH_STACK.md
+/frontend/vercel.md

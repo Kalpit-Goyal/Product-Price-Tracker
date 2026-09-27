@@ -49,15 +49,15 @@ services:
     runtime: node
     plan: free # free | starter. See the note above before choosing 'free'.
     # WHY THIS IS 'free' AND NOT 'starter'. Free is the assignment's constraint, and the
-    # 10-minute keep-warm ping in DEPLOYMENT.md step 4b does defeat the 15-minute idle
-    # spin-down. The thing to be aware of, because it is not obvious from the dashboard:
+    # 10-minute keep-warm ping does defeat the 15-minute idle spin-down. The thing to be
+    # aware of, because it is not obvious from the dashboard:
     # Render grants 750 free instance-hours per WORKSPACE per calendar month, and a
     # running service consumes them whether or not anyone is using it. A 10-minute ping
     # means the service is never asleep: 24 x 30.5 = ~744h against a 750h cap, i.e. about
     # 6 hours of slack for the entire month. Exhaust the cap and Render suspends EVERY
     # free service on the account until the 1st -- not just this one. Budget accordingly,
     # or set plan: starter (~$7/mo) and delete the ping, the spin-down and the cap
-    # together. See BUILD_LOG.md for the full tradeoff.
+    # together.
     region: singapore # closest to the store; keeps scrape latency down
     branch: main
     rootDir: backend
@@ -150,7 +150,7 @@ services:
       # not exist until after the backend is deployed, so demanding it here is a
       # chicken-and-egg deadlock. It is also not doing much security work: the API is
       # public and read-mostly, and the only mutating route is gated by CRON_SECRET,
-      # not by origin. DEPLOYMENT.md step 3.5 tightens this once both URLs are real.
+      # not by origin, so the origin is not the security boundary here.
       - key: ALLOWED_ORIGIN
         sync: false
 

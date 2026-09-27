@@ -2,8 +2,8 @@
 
 Why the system is built this way, and what the first drafts got wrong.
 
-Companion to [`README.md`](README.md) (how to run it) and
-[`BUILD_LOG.md`](BUILD_LOG.md) (what broke and when).
+Companion to [`README.md`](README.md) (how to run it). The failure-by-failure
+working log that these decisions came out of is kept out of the repository.
 
 ---
 
@@ -64,8 +64,8 @@ destroys the very timing the gate is testing.
 This is the single most fragile part of the system and it is fragile for a reason
 that is not a bug in this code: it is emulating a human on a timer. The gate
 budgets 14 moves at 40ms plus dwell. It has to be tuned against the real store, and
-`BUILD_LOG.md` Failure 19 is the measurement that stopped me from "improving" it
-into uselessness.
+the measurement of that gate is what stopped me from "improving" it into
+uselessness.
 
 ### The catalog is a sampler, not a listing
 

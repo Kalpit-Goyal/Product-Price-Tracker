@@ -12,9 +12,8 @@ support. That is what most of the code here is about.
 - **Frontend:** React 18 + Vite
 - **Database:** Supabase/Postgres, with a local JSON store for development
 - **Deploy:** Render (API) + Vercel (dashboard) + cron-job.org (schedule)
-- **Docs:** [`DEPLOYMENT.md`](DEPLOYMENT.md) for shipping, [`DESIGN_NOTE.md`](DESIGN_NOTE.md)
-  for why it is built this way, [`BUILD_LOG.md`](BUILD_LOG.md) for the failures found
-  along the way
+- **Docs:** [`DESIGN_NOTE.md`](DESIGN_NOTE.md) for why it is built this way — the
+  trade-offs, and what the first drafts got wrong
 
 ---
 
@@ -119,8 +118,7 @@ every load. The history chart shows observations and min/max/spread. It never sa
 
 ## API
 
-Base URL `http://localhost:10000`. Full detail in
-[`REQUIREMENTS.md`](REQUIREMENTS.md).
+Base URL `http://localhost:10000`.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -235,11 +233,11 @@ Stated plainly rather than left to be discovered.
 - **No real Supabase project has been run against this.** The migrations, the
   `record_success()` RPC and the RLS policies are verified by review and by
   memory-mode parity tests, not by execution. There are no credentials in this
-  environment. See `DEPLOYMENT.md` step 1 for the one query that proves the
-  migrations applied.
+  environment.
 - **The Render free tier will fight the schedule.** It idles after ~15 minutes
-  while the cron fires every 2 hours, so every run cold-starts. The fix is a
-  10-minute keep-warm ping; the reasoning is in `DEPLOYMENT.md` step 2.
+  while the cron fires every 2 hours, so a cold service will fail the first request
+  that reaches it. The fix is an external 10-minute keep-warm ping, which is what
+  the `/api/health` route exists for.
 - **Catalog coverage is high, not absolute.** 956-958 of 960 measured. The missing
   few are products the sampler has not drawn. Coverage is reported to the caller
   rather than hidden.
